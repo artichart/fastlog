@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FastLog">
+<meta name="theme-color" content="#0e1424">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>FastLog</title>
+<style>
+:root{
+  --bg:#0e1424; --card:#18203a; --card2:#202a4a; --line:#2c3760;
+  --text:#eef1fa; --mute:#8b94b3; --accent:#ffb547; --ok:#3fd0a0; --bad:#ff6b6b;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Noto Sans Thai",sans-serif;
+  -webkit-user-select:none;user-select:none}
+body{padding:env(safe-area-inset-top) 0 calc(72px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px}
+header h1{font-size:20px;margin:0;letter-spacing:.5px}
+header h1 b{color:var(--accent)}
+.iconbtn{width:40px;height:40px;border-radius:50%;border:0;background:var(--card);color:var(--text);font-size:18px}
+main{padding:0 16px}
+.view{display:none}.view.on{display:block}
+.card{background:var(--card);border-radius:18px;padding:16px;margin-bottom:14px}
+.row{display:flex;gap:10px;align-items:center}
+.between{justify-content:space-between}
+.mute{color:var(--mute);font-size:13px}
+.big{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+button.primary{width:100%;padding:16px;border:0;border-radius:16px;background:var(--accent);color:#1b1300;font-size:18px;font-weight:700}
+button.primary.stop{background:var(--bad);color:#fff}
+button.ghost{padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--text);font-size:14px}
+.streak{display:flex;gap:12px;align-items:center;background:var(--card2);border-radius:14px;padding:10px 14px;margin-bottom:14px}
+.streak .n{font-size:22px;font-weight:700;color:var(--ok)}
+.ringwrap{position:relative;width:min(78vw,300px);aspect-ratio:1;margin:8px auto 18px}
+.ringwrap svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ringtxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.ringtxt .t{font-size:40px;font-weight:700;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;margin-top:8px;padding:6px 14px;border-radius:999px;border:1px solid var(--line);font-size:14px;color:var(--text);background:transparent}
+.stats3{display:grid;grid-template-columns:repeat(3,1fr);text-align:center;gap:6px}
+.stats3 .v{font-size:20px;font-weight:700}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);
+  background:#121a30;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.tabs button{background:none;border:0;color:var(--mute);padding:10px 0 8px;font-size:11px}
+.tabs button span{display:block;font-size:20px;margin-bottom:2px}
+.tabs button.on{color:var(--accent)}
+.list .item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.list .item:last-child{border-bottom:0}
+.badge{font-size:11px;padding:3px 8px;border-radius:999px;background:var(--ok);color:#06281d;font-weight:700}
+.badge.no{background:var(--line);color:var(--mute)}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center}
+.cal .h{font-size:11px;color:var(--mute)}
+.cal .d{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:14px}
+.cal .d.done{background:var(--ok);color:#06281d;font-weight:700}
+.cal .d.part{border:2px solid var(--accent)}
+.cal .d.today{outline:2px solid var(--text);outline-offset:1px}
+.cal .d.sel{background:var(--accent);color:#1b1300}
+input,select{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px;-webkit-user-select:text;user-select:text}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 6px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-end;z-index:10}
+.sheet.on{display:flex}
+.sheet .box{width:100%;background:var(--card);border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+.sheet h3{margin:0 0 6px}
+.presets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.presets button{padding:12px 0;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px}
+.presets button.on{background:var(--accent);color:#1b1300;border-color:var(--accent)}
+svg text{font-family:inherit}
+</style>
+</head>
+<body>
+<header>
+  <button class="iconbtn" onclick="openSettings()" aria-label="ตั้งค่า">⚙︎</button>
+  <h1>Fast<b>Log</b></h1>
+  <button class="iconbtn" onclick="openFast()" aria-label="เพิ่มย้อนหลัง">＋</button>
+</header>
+
+<main>
+  <!-- TIMER -->
+  <section class="view on" id="v-timer">
+    <div class="streak">
+      <div class="n" id="streakN">0</div>
+      <div><div>วันติดที่อดครบเป้า</div><div class="mute" id="streakSub"></div></div>
+    </div>
+    <div class="ringwrap">
+      <svg viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#1e2747" stroke-width="10"/>
+        <circle id="ring" cx="60" cy="60" r="52" fill="none" stroke="var(--accent)" stroke-width="10"
+          stroke-linecap="round" stroke-dasharray="326.73" stroke-dashoffset="326.73"/>
+      </svg>
+      <div class="ringtxt">
+        <div class="mute" id="ringLabel">เป้าหมาย</div>
+        <div class="t" id="ringTime">16 ชม.</div>
+        <div class="mute" id="ringSub"></div>
+        <button class="chip" id="goalChip" onclick="openGoal()">เปลี่ยนเป้า</button>
+      </div>
+    </div>
+    <button class="primary" id="mainBtn" onclick="toggleFast()">เริ่มอด</button>
+    <div class="card" id="runInfo" style="margin-top:14px;display:none">
+      <div class="row between"><span class="mute">เริ่ม</span><span id="riStart"></span></div>
+      <div class="row between" style="margin-top:8px"><span class="mute">ครบเป้า</span><span id="riEnd"></span></div>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" style="flex:1" onclick="editRunningStart()">แก้เวลาเริ่ม</button>
+        <button class="ghost" style="flex:1" onclick="addReminder()">🔔 เตือนตอนครบ</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- SUMMARY + WEEK -->
+  <section class="view" id="v-sum">
+    <div class="card">
+      <div class="row between"><b>10 วันล่าสุด</b><span class="mute" id="goalLineLbl"></span></div>
+      <div id="chart10"></div>
+      <div class="stats3" style="margin-top:10px">
+        <div><div class="v" id="s1"></div><div class="mute">ครบเป้า</div></div>
+        <div><div class="v" id="s2"></div><div class="mute">รวมชั่วโมง</div></div>
+        <div><div class="v" id="s3"></div><div class="mute">เฉลี่ย/ครั้ง</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="stats3">
+        <div><div class="v" id="st1"></div><div class="mute">วันติด (ครบเป้า)</div></div>
+        <div><div class="v" id="st2"></div><div class="mute">วันติด (มีบันทึก)</div></div>
+        <div><div class="v" id="st3"></div><div class="mute">ยาวสุด (ชม.)</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row between">
+        <button class="iconbtn" onclick="shiftWeek(-1)">‹</button>
+        <b id="weekLbl"></b>
+        <button class="iconbtn" onclick="shiftWeek(1)">›</button>
+      </div>
+      <div class="list" id="weekList"></div>
+    </div>
+  </section>
+
+  <!-- CALENDAR -->
+  <section class="view" id="v-cal">
+    <div class="card">
+      <div class="row between" style="margin-bottom:12px">
+        <button class="iconbtn" onclick="shiftMonth(-1)">‹</button>
+        <b id="monLbl"></b>
+        <button class="iconbtn" onclick="shiftMonth(1)">›</button>
+      </div>
+      <div class="cal" id="calGrid"></div>
+      <div class="row mute" style="margin-top:12px;gap:16px;font-size:12px">
+        <span class="row" style="gap:6px"><i style="width:14px;height:14px;border-radius:50%;background:var(--ok)"></i>ครบเป้า</span>
+        <span class="row" style="gap:6px"><i style="width:14px;height:14px;border-radius:50%;border:2px solid var(--accent)"></i>อดไม่ครบ</span>
+      </div>
+    </div>
+    <div class="stats3 card">
+      <div><div class="v" id="m1"></div><div class="mute">ครบเป้าเดือนนี้</div></div>
+      <div><div class="v" id="m2"></div><div class="mute">รวมชั่วโมง</div></div>
+      <div><div class="v" id="m3"></div><div class="mute">น้ำหนักเปลี่ยน</div></div>
+    </div>
+    <div class="card"><b id="dayLbl"></b><div class="list" id="dayList"></div></div>
+  </section>
+
+  <!-- WEIGHT -->
+  <section class="view" id="v-wt">
+    <div class="card">
+      <div class="row between">
+        <div><div class="mute">ล่าสุด</div><div class="big" id="wNow">–</div></div>
+        <div style="text-align:right"><div class="mute">เปลี่ยนจากครั้งแรก</div><div class="big" id="wDiff">–</div></div>
+      </div>
+      <div id="wChart" style="margin-top:10px"></div>
+      <div class="mute" id="wTarget"></div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <input type="date" id="wDate" style="flex:1.2">
+        <input type="number" id="wKg" inputmode="decimal" step="0.1" placeholder="กก." style="flex:1">
+      </div>
+      <button class="primary" style="margin-top:10px" onclick="saveWeight()">บันทึกน้ำหนัก</button>
+    </div>
+    <div class="card list" id="wList"></div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button class="on" data-v="timer"><span>⏱</span>จับเวลา</button>
+  <button data-v="sum"><span>📊</span>สรุป</button>
+  <button data-v="cal"><span>📅</span>ปฏิทิน</button>
+  <button data-v="wt"><span>⚖︎</span>น้ำหนัก</button>
+</nav>
+
+<!-- goal sheet -->
+<div class="sheet" id="shGoal" onclick="if(event.target===this)closeSheet(this)">
+  <div class="box">
+    <h3>เป้าหมายการอด</h3>
+    <div class="presets" id="presets"></div>
+    <label>กำหนดเอง (ชั่วโมง)</label>
+    <input type="number" id="goalCustom" inputmode="decimal" min="1" max="96" step="0.5">
+    <button class="primary" style="margin-top:14px" onclick="saveGoal()">ตกลง</button>
+  </div>
+</div>
+
+<!-- fast edit sheet -->
+<div class="sheet" id="shFast" onclick="if(event.target===this)closeSheet(this)">
+  <div class="box">
+    <h3 id="fTitle">บันทึกการอด</h3>
+    <label>เริ่ม</label><input type="datetime-local" id="fStart">
+    <label>จบ (เว้นว่าง = ยังอดอยู่)</label><input type="datetime-local" id="fEnd">
+    <label>เป้า (ชั่วโมง)</label><input type="number" id="fGoal" inputmode="decimal" step="0.5">
+    <button class="primary" style="margin-top:14px" onclick="saveFast()">บันทึก</button>
+    <button class="ghost" id="fDel" style="width:100%;margin-top:10px;color:var(--bad)" onclick="delFast()">ลบรายการนี้</button>
+  </div>
+</div>
+
+<!-- settings sheet -->
+<div class="sheet" id="shSet" onclick="if(event.target===this)closeSheet(this)">
+  <div class="box">
+    <h3>ตั้งค่า</h3>
+    <label>น้ำหนักเป้าหมาย (กก.)</label>
+    <input type="number" id="tKg" inputmode="decimal" step="0.1">
+    <button class="primary" style="margin-top:10px" onclick="saveTarget()">บันทึก</button>
+    <label style="margin-top:18px">ข้อมูลอยู่ในเครื่องนี้เท่านั้น ควรสำรองไว้เป็นระยะ</label>
+    <div class="row">
+      <button class="ghost" style="flex:1" onclick="exportData()">สำรองข้อมูล</button>
+      <button class="ghost" style="flex:1" onclick="document.getElementById('imp').click()">กู้คืน</button>
+    </div>
+    <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importData(this.files[0])">
+    <div class="mute" id="lastBackup" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<script>
+const KEY = 'fastlog.v1';
+const H = 3600e3, DAY = 24 * H;
+const TH_DAY = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+const TH_MON = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+let db = load();
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KEY));
+    if (d && Array.isArray(d.fasts)) return Object.assign({ weights: [], goal: 16, targetKg: null }, d);
+  } catch (e) {}
+  return { fasts: [], weights: [], goal: 16, targetKg: null, lastBackup: null };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('บันทึกไม่ได้: ' + e.message); } }
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+
+// ---------- helpers ----------
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const dayKey = ms => { const d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+const startOfDay = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const addDays = (ms, n) => { const d = new Date(ms); d.setDate(d.getDate() + n); return d.getTime(); };
+const toInput = ms => { const d = new Date(ms); return dayKey(ms) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const fromInput = s => s ? new Date(s).getTime() : null;
+const hm = ms => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const dShort = ms => { const d = new Date(ms); return TH_DAY[d.getDay()] + ' ' + d.getDate() + ' ' + TH_MON[d.getMonth()]; };
+const hrs = ms => (ms / H).toFixed(1);
+const clock = ms => { ms = Math.max(0, ms); const s = Math.floor(ms / 1000); return pad(Math.floor(s / 3600)) + ':' + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60); };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+const running = () => db.fasts.find(f => !f.end);
+const done = () => db.fasts.filter(f => f.end).sort((a, b) => a.start - b.start);
+const dur = f => (f.end || Date.now()) - f.start;
+const isComplete = f => f.end && dur(f) >= f.goal * H;
+// a fast belongs to the day it ended
+const byDay = () => { const m = {}; for (const f of done()) (m[dayKey(f.end)] = m[dayKey(f.end)] || []).push(f); return m; };
+
+function streaks() {
+  const m = byDay();
+  const count = test => {
+    let d = startOfDay(Date.now()), n = 0;
+    if (!test(m[dayKey(d)])) d = addDays(d, -1); // today not finished yet doesn't break the streak
+    while (test(m[dayKey(d)])) { n++; d = addDays(d, -1); }
+    return n;
+  };
+  return { completed: count(l => l && l.some(isComplete)), logged: count(l => l && l.length) };
+}
+
+// ---------- tabs ----------
+let curView = 'timer';
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  curView = b.dataset.v;
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + curView));
+  render();
+});
+function render() {
+  renderTimer();
+  if (curView === 'sum') renderSummary();
+  if (curView === 'cal') renderCal();
+  if (curView === 'wt') renderWeight();
+}
+
+// ---------- timer ----------
+const CIRC = 2 * Math.PI * 52;
+function renderTimer() {
+  const f = running(), st = streaks();
+  $('streakN').textContent = st.completed;
+  $('streakSub').textContent = 'บันทึกติดกัน ' + st.logged + ' วัน';
+  if (!f) {
+    $('ringLabel').textContent = 'เป้าหมาย';
+    $('ringTime').textContent = db.goal + ' ชม.';
+    $('ringSub').textContent = '';
+    $('ring').style.strokeDashoffset = CIRC;
+    $('ring').style.opacity = 0;
+    $('goalChip').style.display = '';
+    $('mainBtn').textContent = 'เริ่มอด';
+    $('mainBtn').classList.remove('stop');
+    $('runInfo').style.display = 'none';
+    return;
+  }
+  const el = dur(f), goalMs = f.goal * H, p = Math.min(1, el / goalMs);
+  const reached = el >= goalMs;
+  $('ringLabel').textContent = reached ? 'ครบเป้าแล้ว 🎉' : 'อดมาแล้ว';
+  $('ringTime').textContent = clock(el);
+  $('ringSub').textContent = reached ? 'เกินมา ' + clock(el - goalMs) : 'เหลือ ' + clock(goalMs - el);
+  $('ring').style.strokeDashoffset = CIRC * (1 - p);
+  $('ring').style.opacity = 1;
+  $('ring').style.stroke = reached ? 'var(--ok)' : 'var(--accent)';
+  $('goalChip').style.display = 'none';
+  $('mainBtn').textContent = 'จบการอด';
+  $('mainBtn').classList.add('stop');
+  $('runInfo').style.display = '';
+  $('riStart').textContent = dShort(f.start) + ' ' + hm(f.start);
+  $('riEnd').textContent = dShort(f.start + goalMs) + ' ' + hm(f.start + goalMs) + ' (' + f.goal + ' ชม.)';
+  if (reached && !f.notified) {
+    f.notified = true; save();
+    if (window.Notification && Notification.permission === 'granted')
+      navigator.serviceWorker?.ready.then(r => r.showNotification('ครบ ' + f.goal + ' ชม. แล้ว', { body: 'กดจบการอดในแอปได้เลย', icon: 'icon-180.png' }));
+  }
+}
+function toggleFast() {
+  const f = running();
+  if (!f) {
+    db.fasts.push({ id: uid(), start: Date.now(), end: null, goal: db.goal });
+    save();
+    if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+  } else {
+    const el = dur(f);
+    const msg = el >= f.goal * H ? 'จบการอด ' + hrs(el) + ' ชม.?' : 'ยังไม่ครบเป้า (' + hrs(el) + '/' + f.goal + ' ชม.) จบเลยไหม?';
+    if (!confirm(msg)) return;
+    f.end = Date.now();
+    if (el < 0.25 * H && confirm('อดไม่ถึง 15 นาที ลบรายการนี้ทิ้งไหม?')) db.fasts = db.fasts.filter(x => x !== f);
+    save();
+  }
+  render();
+}
+function editRunningStart() { openFast(running().id); }
+
+// .ics ให้ปฏิทิน iPhone เตือน — PWA บน iOS ตั้ง notification ล่วงหน้าเองไม่ได้
+function addReminder() {
+  const f = running(); if (!f) return;
+  const t = f.start + f.goal * H;
+  const z = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//FastLog//TH', 'BEGIN:VEVENT',
+    'UID:' + f.id + '@fastlog', 'DTSTAMP:' + z(Date.now()), 'DTSTART:' + z(t), 'DTEND:' + z(t + 15 * 60e3),
+    'SUMMARY:ครบ ' + f.goal + ' ชม. จบการอดได้', 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:ครบเป้าการอด',
+    'TRIGGER:PT0M', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+  download('fast-' + dayKey(t) + '.ics', ics, 'text/calendar');
+}
+
+// ---------- goal ----------
+const PRESETS = [12, 13, 14, 16, 18, 20, 23, 24];
+function openGoal() {
+  $('presets').innerHTML = PRESETS.map(h => `<button class="${h === db.goal ? 'on' : ''}" onclick="db.goal=${h};save();closeSheet($('shGoal'));render()">${h}:${24 - h > 0 ? 24 - h : 0}</button>`).join('');
+  $('goalCustom').value = db.goal;
+  $('shGoal').classList.add('on');
+}
+function saveGoal() {
+  const v = parseFloat($('goalCustom').value);
+  if (!(v > 0 && v <= 96)) return alert('ใส่ 1–96 ชั่วโมง');
+  db.goal = v; save(); closeSheet($('shGoal')); render();
+}
+
+// ---------- add / edit fast ----------
+let editId = null;
+function openFast(id) {
+  editId = id || null;
+  const f = id && db.fasts.find(x => x.id === id);
+  $('fTitle').textContent = f ? 'แก้ไขการอด' : 'เพิ่มการอดย้อนหลัง';
+  const now = Date.now();
+  $('fStart').value = toInput(f ? f.start : now - db.goal * H);
+  $('fEnd').value = f ? (f.end ? toInput(f.end) : '') : toInput(now);
+  $('fGoal').value = f ? f.goal : db.goal;
+  $('fDel').style.display = f ? '' : 'none';
+  $('shFast').classList.add('on');
+}
+function saveFast() {
+  const start = fromInput($('fStart').value), end = fromInput($('fEnd').value), goal = parseFloat($('fGoal').value);
+  if (!start) return alert('ใส่เวลาเริ่ม');
+  if (start > Date.now()) return alert('เวลาเริ่มอยู่ในอนาคต');
+  if (end && end <= start) return alert('เวลาจบต้องหลังเวลาเริ่ม');
+  if (!(goal > 0)) return alert('ใส่เป้าเป็นชั่วโมง');
+  const r = running();
+  if (!end && r && r.id !== editId) return alert('มีการอดที่กำลังดำเนินอยู่แล้ว');
+  let f = editId && db.fasts.find(x => x.id === editId);
+  if (!f) { f = { id: uid() }; db.fasts.push(f); }
+  if (f.start !== start || f.goal !== goal) delete f.notified;
+  Object.assign(f, { start, end: end || null, goal });
+  save(); closeSheet($('shFast')); render();
+}
+function delFast() {
+  if (!confirm('ลบรายการนี้?')) return;
+  db.fasts = db.fasts.filter(x => x.id !== editId);
+  save(); closeSheet($('shFast')); render();
+}
+function closeSheet(el) { el.classList.remove('on'); }
+
+// ---------- summary ----------
+function renderSummary() {
+  const today = startOfDay(Date.now()), m = byDay(), days = [];
+  for (let i = 9; i >= 0; i--) {
+    const d = addDays(today, -i), list = m[dayKey(d)] || [];
+    days.push({ d, list, h: list.reduce((a, f) => Math.max(a, dur(f) / H), 0) });
+  }
+  const r = running();
+  if (r) days[9].live = dur(r) / H;
+  const all = days.flatMap(x => x.list);
+  const goal = db.goal, maxH = Math.max(goal * 1.25, ...days.map(x => Math.max(x.h, x.live || 0)));
+  const W = 340, Hh = 190, base = 165, top = 18, bw = 20, gap = W / 10;
+  const y = h => base - (h / maxH) * (base - top);
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" width="100%">`;
+  s += `<line x1="0" x2="${W}" y1="${y(goal)}" y2="${y(goal)}" stroke="#56618c" stroke-dasharray="4 4"/>`;
+  days.forEach((x, i) => {
+    const cx = gap * i + gap / 2, h = Math.max(x.h, x.live || 0);
+    const col = x.list.some(isComplete) ? 'var(--ok)' : x.live ? 'var(--accent)' : '#56618c';
+    if (h > 0) {
+      const yy = y(h);
+      s += `<rect x="${cx - bw / 2}" y="${yy}" width="${bw}" height="${Math.max(bw, base - yy)}" rx="${bw / 2}" fill="${col}" ${x.live && !x.h ? 'fill-opacity=".5"' : ''}/>`;
+      s += `<text x="${cx}" y="${yy - 5}" fill="${col}" font-size="11" text-anchor="middle">${h.toFixed(1)}</text>`;
+    }
+    s += `<text x="${cx}" y="${Hh - 4}" fill="#8b94b3" font-size="11" text-anchor="middle">${TH_DAY[new Date(x.d).getDay()]}</text>`;
+  });
+  $('chart10').innerHTML = s + '</svg>';
+  $('goalLineLbl').textContent = 'เส้นประ = ' + goal + ' ชม.';
+  const tot = all.reduce((a, f) => a + dur(f), 0);
+  $('s1').textContent = all.filter(isComplete).length + '/' + all.length;
+  $('s2').textContent = hrs(tot);
+  $('s3').textContent = all.length ? hrs(tot / all.length) : '–';
+  const st = streaks();
+  $('st1').textContent = st.completed + ' วัน';
+  $('st2').textContent = st.logged + ' วัน';
+  $('st3').textContent = done().length ? hrs(Math.max(...done().map(dur))) : '–';
+  renderWeek();
+}
+let weekOff = 0;
+function shiftWeek(n) { weekOff = Math.min(0, weekOff + n); renderWeek(); }
+function renderWeek() {
+  const t = startOfDay(Date.now()), dow = (new Date(t).getDay() + 6) % 7; // week starts Monday
+  const mon = addDays(t, -dow + weekOff * 7), m = byDay();
+  $('weekLbl').textContent = dShort(mon).replace(/^\S+ /, '') + ' – ' + dShort(addDays(mon, 6)).replace(/^\S+ /, '');
+  let h = '';
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(mon, i), list = m[dayKey(d)] || [];
+    if (!list.length) { h += `<div class="item"><span>${dShort(d)}</span><span class="mute">ไม่มีบันทึก</span></div>`; continue; }
+    h += list.map(f => fastRow(f, dShort(d))).join('');
+  }
+  $('weekList').innerHTML = h;
+}
+function fastRow(f, title) {
+  return `<div class="item" onclick="openFast('${f.id}')">
+    <div><div>${title} · ${hrs(dur(f))} ชม. <span class="badge ${isComplete(f) ? '' : 'no'}">${isComplete(f) ? 'ครบ' : 'ไม่ครบ'}</span></div>
+    <div class="mute">${dShort(f.start)} ${hm(f.start)} → ${dShort(f.end)} ${hm(f.end)} · เป้า ${f.goal}</div></div>
+    <span class="mute">✎</span></div>`;
+}
+
+// ---------- calendar ----------
+let monOff = 0, selDay = dayKey(Date.now());
+function shiftMonth(n) { monOff += n; renderCal(); }
+function renderCal() {
+  const now = new Date(), first = new Date(now.getFullYear(), now.getMonth() + monOff, 1);
+  const y = first.getFullYear(), mo = first.getMonth(), nDays = new Date(y, mo + 1, 0).getDate();
+  $('monLbl').textContent = TH_MON[mo] + ' ' + (y + 543);
+  const m = byDay(), todayK = dayKey(Date.now());
+  let h = ['จ','อ','พ','พฤ','ศ','ส','อา'].map(x => `<div class="h">${x}</div>`).join('');
+  h += '<div></div>'.repeat((first.getDay() + 6) % 7);
+  let cnt = 0, tot = 0;
+  for (let d = 1; d <= nDays; d++) {
+    const k = y + '-' + pad(mo + 1) + '-' + pad(d), list = m[k] || [];
+    const ok = list.some(isComplete);
+    if (ok) cnt++;
+    tot += list.reduce((a, f) => a + dur(f), 0);
+    const cls = ['d', ok ? 'done' : list.length ? 'part' : '', k === todayK ? 'today' : '', k === selDay ? 'sel' : ''].join(' ');
+    h += `<div class="${cls}" onclick="selDay='${k}';renderCal()">${d}</div>`;
+  }
+  $('calGrid').innerHTML = h;
+  $('m1').textContent = cnt;
+  $('m2').textContent = hrs(tot);
+  const ws = db.weights.filter(w => w.date.startsWith(y + '-' + pad(mo + 1))).sort((a, b) => a.date < b.date ? -1 : 1);
+  $('m3').textContent = ws.length > 1 ? fmtDiff(ws[ws.length - 1].kg - ws[0].kg) : '–';
+  const list = m[selDay] || [], sd = new Date(selDay + 'T00:00').getTime();
+  $('dayLbl').textContent = dShort(sd);
+  $('dayList').innerHTML = list.length ? list.map(f => fastRow(f, 'อด')).join('') : '<div class="item mute">ไม่มีการอดที่จบในวันนี้</div>';
+}
+
+// ---------- weight ----------
+const fmtDiff = v => (v > 0 ? '+' : '') + v.toFixed(1);
+function renderWeight() {
+  if (!$('wDate').value) $('wDate').value = dayKey(Date.now());
+  const ws = [...db.weights].sort((a, b) => a.date < b.date ? -1 : 1);
+  $('wNow').textContent = ws.length ? ws[ws.length - 1].kg.toFixed(1) : '–';
+  const df = ws.length > 1 ? ws[ws.length - 1].kg - ws[0].kg : null;
+  $('wDiff').textContent = df === null ? '–' : fmtDiff(df);
+  $('wDiff').style.color = df === null ? '' : df <= 0 ? 'var(--ok)' : 'var(--bad)';
+  $('wTarget').textContent = db.targetKg && ws.length ? 'เป้า ' + db.targetKg + ' กก. · เหลือ ' + (ws[ws.length - 1].kg - db.targetKg).toFixed(1) + ' กก.' : '';
+  $('wChart').innerHTML = ws.length > 1 ? lineChart(ws) : '<div class="mute">บันทึก 2 ครั้งขึ้นไปจึงจะเห็นกราฟ</div>';
+  $('wList').innerHTML = ws.length ? ws.slice().reverse().map(w =>
+    `<div class="item"><span>${dShort(new Date(w.date + 'T00:00').getTime())}</span><span>${w.kg.toFixed(1)} กก. <button class="ghost" style="padding:4px 10px;margin-left:8px" onclick="delWeight('${w.date}')">ลบ</button></span></div>`).join('')
+    : '<div class="mute">ยังไม่มีบันทึก</div>';
+}
+function lineChart(ws) {
+  const W = 340, Hh = 150, pl = 34, pr = 8, pt = 10, pb = 22;
+  const vals = ws.map(w => w.kg).concat(db.targetKg ? [db.targetKg] : []);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 1) { lo -= 0.5; hi += 0.5; }
+  const t0 = new Date(ws[0].date).getTime(), t1 = new Date(ws[ws.length - 1].date).getTime() || t0 + 1;
+  const X = d => pl + (W - pl - pr) * ((new Date(d).getTime() - t0) / Math.max(1, t1 - t0));
+  const Y = v => pt + (Hh - pt - pb) * (1 - (v - lo) / (hi - lo));
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" width="100%">`;
+  [hi, (hi + lo) / 2, lo].forEach(v => s += `<text x="0" y="${Y(v) + 4}" fill="#8b94b3" font-size="10">${v.toFixed(1)}</text><line x1="${pl}" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2c3760"/>`);
+  if (db.targetKg) s += `<line x1="${pl}" x2="${W}" y1="${Y(db.targetKg)}" y2="${Y(db.targetKg)}" stroke="var(--ok)" stroke-dasharray="4 4"/>`;
+  s += `<polyline fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" points="${ws.map(w => X(w.date) + ',' + Y(w.kg)).join(' ')}"/>`;
+  ws.forEach(w => s += `<circle cx="${X(w.date)}" cy="${Y(w.kg)}" r="3" fill="var(--accent)"/>`);
+  s += `<text x="${pl}" y="${Hh - 4}" fill="#8b94b3" font-size="10">${dShort(t0).replace(/^\S+ /, '')}</text>`;
+  s += `<text x="${W}" y="${Hh - 4}" fill="#8b94b3" font-size="10" text-anchor="end">${dShort(new Date(ws[ws.length - 1].date).getTime()).replace(/^\S+ /, '')}</text>`;
+  return s + '</svg>';
+}
+function saveWeight() {
+  const date = $('wDate').value, kg = parseFloat($('wKg').value);
+  if (!date || !(kg > 20 && kg < 400)) return alert('ใส่วันที่และน้ำหนัก (กก.)');
+  db.weights = db.weights.filter(w => w.date !== date).concat({ date, kg });
+  save(); $('wKg').value = ''; renderWeight();
+}
+function delWeight(date) { if (confirm('ลบน้ำหนักวันนี้?')) { db.weights = db.weights.filter(w => w.date !== date); save(); renderWeight(); } }
+
+// ---------- settings / backup ----------
+function openSettings() {
+  $('tKg').value = db.targetKg || '';
+  $('lastBackup').textContent = db.lastBackup ? 'สำรองล่าสุด ' + dShort(db.lastBackup) + ' ' + hm(db.lastBackup) : 'ยังไม่เคยสำรอง';
+  $('shSet').classList.add('on');
+}
+function saveTarget() { const v = parseFloat($('tKg').value); db.targetKg = v > 0 ? v : null; save(); closeSheet($('shSet')); render(); }
+function download(name, text, type) {
+  const file = new File([text], name, { type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function exportData() {
+  db.lastBackup = Date.now(); save();
+  download('fastlog-' + dayKey(Date.now()) + '.json', JSON.stringify(db, null, 1), 'application/json');
+  openSettings();
+}
+function importData(file) {
+  if (!file) return;
+  file.text().then(t => {
+    const d = JSON.parse(t);
+    if (!Array.isArray(d.fasts)) throw new Error('ไฟล์ไม่ถูกต้อง');
+    if (!confirm('แทนที่ข้อมูลปัจจุบันด้วย ' + d.fasts.length + ' การอด / ' + (d.weights || []).length + ' น้ำหนัก?')) return;
+    db = Object.assign({ weights: [], goal: 16, targetKg: null }, d); save(); closeSheet($('shSet')); render();
+  }).catch(e => alert('กู้คืนไม่ได้: ' + e.message));
+  $('imp').value = '';
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+render();
+setInterval(renderTimer, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+</script>
+</body>
+</html>
