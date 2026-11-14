@@ -192,9 +192,13 @@ svg text{font-family:inherit}
 <div class="sheet" id="shGoal" onclick="if(event.target===this)closeSheet(this)">
   <div class="box">
     <h3>เป้าหมายการอด</h3>
-    <div class="presets" id="presets"></div>
-    <label>กำหนดเอง (ชั่วโมง)</label>
-    <input type="number" id="goalCustom" inputmode="decimal" min="1" max="96" step="0.5">
+    <label>จันทร์–ศุกร์ (ชั่วโมง)</label>
+    <div class="presets" id="presetsWd"></div>
+    <input type="number" id="goalWd" inputmode="decimal" min="1" max="96" step="0.5">
+    <label style="margin-top:12px;display:block">เสาร์–อาทิตย์ (ชั่วโมง)</label>
+    <div class="presets" id="presetsWe"></div>
+    <input type="number" id="goalWe" inputmode="decimal" min="1" max="96" step="0.5">
+    <div class="mute" style="margin-top:8px;font-size:13px">นับตามวันที่จบการอด · เริ่มคืนศุกร์ จบเช้าเสาร์ = เป้าเสาร์</div>
     <button class="primary" style="margin-top:14px" onclick="saveGoal()">ตกลง</button>
   </div>
 </div>
@@ -238,10 +242,24 @@ let db = load();
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && Array.isArray(d.fasts)) return Object.assign({ weights: [], goal: 16, targetKg: null }, d);
+    if (d && Array.isArray(d.fasts)) return migrate(Object.assign({ weights: [], targetKg: null }, d));
   } catch (e) {}
-  return { fasts: [], weights: [], goal: 16, targetKg: null, lastBackup: null };
+  return { fasts: [], weights: [], goalWd: 14, goalWe: 12, targetKg: null, lastBackup: null };
 }
+// 14 พ.ย. 69: เปลี่ยนจากเป้าเดียว 16 → จ–ศ 14:10 · ส–อา 12:12 (ประวัติเดิมคงเป้าเดิมไว้)
+function migrate(d) {
+  if (d.goalWd == null) {
+    d.goalWd = 14; d.goalWe = 12;
+    const r = d.fasts.find(f => !f.end);
+    if (r && r.goal === d.goal) r.goal = goalFor(r.start, d), delete r.notified;
+  }
+  delete d.goal;
+  return d;
+}
+function isWeekend(ms) { const g = new Date(ms).getDay(); return g === 0 || g === 6; }
+function goalOfDay(ms, d = db) { return isWeekend(ms) ? d.goalWe : d.goalWd; }
+// เป้าของการอดที่เริ่ม ณ start = เป้าของวันที่คาดว่าจะจบ (อิงเป้าวันธรรมดา)
+function goalFor(start, d = db) { return goalOfDay(start + d.goalWd * 3600e3, d); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('บันทึกไม่ได้: ' + e.message); } }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
@@ -300,7 +318,7 @@ function renderTimer() {
   $('streakSub').textContent = 'บันทึกติดกัน ' + st.logged + ' วัน';
   if (!f) {
     $('ringLabel').textContent = 'เป้าหมาย';
-    $('ringTime').textContent = db.goal + ' ชม.';
+    $('ringTime').textContent = goalFor(Date.now()) + ' ชม.';
     $('ringSub').textContent = '';
     $('ring').style.strokeDashoffset = CIRC;
     $('ring').style.opacity = 0;
@@ -333,7 +351,7 @@ function renderTimer() {
 function toggleFast() {
   const f = running();
   if (!f) {
-    db.fasts.push({ id: uid(), start: Date.now(), end: null, goal: db.goal });
+    db.fasts.push({ id: uid(), start: Date.now(), end: null, goal: goalFor(Date.now()) });
     save();
     if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
   } else {
@@ -361,16 +379,20 @@ function addReminder() {
 }
 
 // ---------- goal ----------
-const PRESETS = [12, 13, 14, 16, 18, 20, 23, 24];
+const PRESETS = [12, 13, 14, 16, 18];
+function drawPresets(k) {
+  const inp = $(k), cur = parseFloat(inp.value);
+  $('presets' + k.slice(4)).innerHTML = PRESETS.map(h => `<button class="${h === cur ? 'on' : ''}" onclick="$('${k}').value=${h};drawPresets('${k}')">${h}:${24 - h}</button>`).join('');
+}
 function openGoal() {
-  $('presets').innerHTML = PRESETS.map(h => `<button class="${h === db.goal ? 'on' : ''}" onclick="db.goal=${h};save();closeSheet($('shGoal'));render()">${h}:${24 - h > 0 ? 24 - h : 0}</button>`).join('');
-  $('goalCustom').value = db.goal;
+  $('goalWd').value = db.goalWd; $('goalWe').value = db.goalWe;
+  drawPresets('goalWd'); drawPresets('goalWe');
   $('shGoal').classList.add('on');
 }
 function saveGoal() {
-  const v = parseFloat($('goalCustom').value);
-  if (!(v > 0 && v <= 96)) return alert('ใส่ 1–96 ชั่วโมง');
-  db.goal = v; save(); closeSheet($('shGoal')); render();
+  const wd = parseFloat($('goalWd').value), we = parseFloat($('goalWe').value);
+  if (!(wd > 0 && wd <= 96 && we > 0 && we <= 96)) return alert('ใส่ 1–96 ชั่วโมง');
+  db.goalWd = wd; db.goalWe = we; save(); closeSheet($('shGoal')); render();
 }
 
 // ---------- add / edit fast ----------
@@ -380,9 +402,9 @@ function openFast(id) {
   const f = id && db.fasts.find(x => x.id === id);
   $('fTitle').textContent = f ? 'แก้ไขการอด' : 'เพิ่มการอดย้อนหลัง';
   const now = Date.now();
-  $('fStart').value = toInput(f ? f.start : now - db.goal * H);
+  $('fStart').value = toInput(f ? f.start : now - goalOfDay(now) * H);
   $('fEnd').value = f ? (f.end ? toInput(f.end) : '') : toInput(now);
-  $('fGoal').value = f ? f.goal : db.goal;
+  $('fGoal').value = f ? f.goal : goalOfDay(now);
   $('fDel').style.display = f ? '' : 'none';
   $('shFast').classList.add('on');
 }
@@ -417,13 +439,13 @@ function renderSummary() {
   const r = running();
   if (r) days[9].live = dur(r) / H;
   const all = days.flatMap(x => x.list);
-  const goal = db.goal, maxH = Math.max(goal * 1.25, ...days.map(x => Math.max(x.h, x.live || 0)));
+  const maxH = Math.max(Math.max(db.goalWd, db.goalWe) * 1.25, ...days.map(x => Math.max(x.h, x.live || 0)));
   const W = 340, Hh = 190, base = 165, top = 18, bw = 20, gap = W / 10;
   const y = h => base - (h / maxH) * (base - top);
   let s = `<svg viewBox="0 0 ${W} ${Hh}" width="100%">`;
-  s += `<line x1="0" x2="${W}" y1="${y(goal)}" y2="${y(goal)}" stroke="#56618c" stroke-dasharray="4 4"/>`;
   days.forEach((x, i) => {
-    const cx = gap * i + gap / 2, h = Math.max(x.h, x.live || 0);
+    const cx = gap * i + gap / 2, h = Math.max(x.h, x.live || 0), gy = y(goalOfDay(x.d));
+    s += `<line x1="${gap * i}" x2="${gap * (i + 1)}" y1="${gy}" y2="${gy}" stroke="#56618c" stroke-dasharray="4 4"/>`;
     const col = x.list.some(isComplete) ? 'var(--ok)' : x.live ? 'var(--accent)' : '#56618c';
     if (h > 0) {
       const yy = y(h);
@@ -433,7 +455,7 @@ function renderSummary() {
     s += `<text x="${cx}" y="${Hh - 4}" fill="#8b94b3" font-size="11" text-anchor="middle">${TH_DAY[new Date(x.d).getDay()]}</text>`;
   });
   $('chart10').innerHTML = s + '</svg>';
-  $('goalLineLbl').textContent = 'เส้นประ = ' + goal + ' ชม.';
+  $('goalLineLbl').textContent = 'เส้นประ = จ–ศ ' + db.goalWd + ' · ส–อา ' + db.goalWe + ' ชม.';
   const tot = all.reduce((a, f) => a + dur(f), 0);
   $('s1').textContent = all.filter(isComplete).length + '/' + all.length;
   $('s2').textContent = hrs(tot);
@@ -559,7 +581,7 @@ function importData(file) {
     const d = JSON.parse(t);
     if (!Array.isArray(d.fasts)) throw new Error('ไฟล์ไม่ถูกต้อง');
     if (!confirm('แทนที่ข้อมูลปัจจุบันด้วย ' + d.fasts.length + ' การอด / ' + (d.weights || []).length + ' น้ำหนัก?')) return;
-    db = Object.assign({ weights: [], goal: 16, targetKg: null }, d); save(); closeSheet($('shSet')); render();
+    db = migrate(Object.assign({ weights: [], targetKg: null }, d)); save(); closeSheet($('shSet')); render();
   }).catch(e => alert('กู้คืนไม่ได้: ' + e.message));
   $('imp').value = '';
 }
