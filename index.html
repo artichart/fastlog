@@ -198,7 +198,7 @@ svg text{font-family:inherit}
     <label style="margin-top:12px;display:block">เสาร์–อาทิตย์ (ชั่วโมง)</label>
     <div class="presets" id="presetsWe"></div>
     <input type="number" id="goalWe" inputmode="decimal" min="1" max="96" step="0.5">
-    <div class="mute" style="margin-top:8px;font-size:13px">นับตามวันที่จบการอด · เริ่มคืนศุกร์ จบเช้าเสาร์ = เป้าเสาร์</div>
+    <div class="mute" style="margin-top:8px;font-size:13px">นับตามวันที่เริ่มอด (เริ่มก่อนตี 5 = คืนของเมื่อวาน) · เริ่มคืนศุกร์ = เป้าศุกร์ · เสาร์ไม่อดไม่ตัดสตรีค</div>
     <button class="primary" style="margin-top:14px" onclick="saveGoal()">ตกลง</button>
   </div>
 </div>
@@ -238,12 +238,15 @@ const H = 3600e3, DAY = 24 * H;
 const TH_DAY = ['อา','จ','อ','พ','พฤ','ศ','ส'];
 const TH_MON = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 
+const DAY_CUT = 5 * 3600e3; // ต้องประกาศก่อน load() — migrate ใช้
 let db = load();
 function load() {
-  try {
-    const d = JSON.parse(localStorage.getItem(KEY));
-    if (d && Array.isArray(d.fasts)) return migrate(Object.assign({ weights: [], targetKg: null }, d));
-  } catch (e) {}
+  let d;
+  try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  if (d && Array.isArray(d.fasts)) {
+    d = Object.assign({ weights: [], targetKg: null }, d);
+    try { return migrate(d); } catch (e) { console.error(e); return d; } // ห้ามคืนค่าว่าง ไม่งั้น save() ทับข้อมูลจริง
+  }
   return { fasts: [], weights: [], goalWd: 14, goalWe: 12, targetKg: null, lastBackup: null };
 }
 // 14 พ.ย. 69: เปลี่ยนจากเป้าเดียว 16 → จ–ศ 14:10 · ส–อา 12:12 (ประวัติเดิมคงเป้าเดิมไว้)
@@ -253,13 +256,20 @@ function migrate(d) {
     const r = d.fasts.find(f => !f.end);
     if (r && r.goal === d.goal) r.goal = goalFor(r.start, d), delete r.notified;
   }
+  // 14 พ.ย. 69: นับการอดเป็นของ "วันที่เริ่ม" (เดิม = วันที่จบ) · ต้นมองว่าเริ่มคืนศุกร์ = ไม้ของศุกร์
+  if (d.dayRule !== 'start') {
+    d.dayRule = 'start';
+    const r = d.fasts.find(f => !f.end);
+    if (r && (r.goal === d.goalWd || r.goal === d.goalWe)) r.goal = goalFor(r.start, d), delete r.notified;
+  }
   delete d.goal;
   return d;
 }
 function isWeekend(ms) { const g = new Date(ms).getDay(); return g === 0 || g === 6; }
 function goalOfDay(ms, d = db) { return isWeekend(ms) ? d.goalWe : d.goalWd; }
-// เป้าของการอดที่เริ่ม ณ start = เป้าของวันที่คาดว่าจะจบ (อิงเป้าวันธรรมดา)
-function goalFor(start, d = db) { return goalOfDay(start + d.goalWd * 3600e3, d); }
+// การอดเป็นของวันที่เริ่ม · เริ่มก่อนตี 5 = ยังนับเป็นคืนของเมื่อวาน
+function fastDayMs(start) { return start - DAY_CUT; }
+function goalFor(start, d = db) { return goalOfDay(fastDayMs(start), d); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('บันทึกไม่ได้: ' + e.message); } }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
@@ -281,15 +291,22 @@ const running = () => db.fasts.find(f => !f.end);
 const done = () => db.fasts.filter(f => f.end).sort((a, b) => a.start - b.start);
 const dur = f => (f.end || Date.now()) - f.start;
 const isComplete = f => f.end && dur(f) >= f.goal * H;
-// a fast belongs to the day it ended
-const byDay = () => { const m = {}; for (const f of done()) (m[dayKey(f.end)] = m[dayKey(f.end)] || []).push(f); return m; };
+// a fast belongs to the day it started (before 05:00 = previous night)
+const fastDay = f => dayKey(fastDayMs(f.start));
+const byDay = () => { const m = {}; for (const f of done()) (m[fastDay(f)] = m[fastDay(f)] || []).push(f); return m; };
 
 function streaks() {
   const m = byDay();
   const count = test => {
-    let d = startOfDay(Date.now()), n = 0;
-    if (!test(m[dayKey(d)])) d = addDays(d, -1); // today not finished yet doesn't break the streak
-    while (test(m[dayKey(d)])) { n++; d = addDays(d, -1); }
+    const r = running(), liveK = r && fastDay(r), todayK = dayKey(Date.now() - DAY_CUT);
+    let d = startOfDay(Date.now() - DAY_CUT), n = 0;
+    for (;;) {
+      const k = dayKey(d), l = m[k];
+      if (test(l)) n++;
+      // ข้ามได้ไม่ตัดสตรีค: วันนี้ยังไม่ทำ · วันที่ไม้ยังอดอยู่ · เสาร์ = ชีทเดย์
+      else if (l && l.length || !(k === todayK || k === liveK || new Date(d).getDay() === 6)) break;
+      d = addDays(d, -1);
+    }
     return n;
   };
   return { completed: count(l => l && l.some(isComplete)), logged: count(l => l && l.length) };
@@ -437,7 +454,7 @@ function renderSummary() {
     days.push({ d, list, h: list.reduce((a, f) => Math.max(a, dur(f) / H), 0) });
   }
   const r = running();
-  if (r) days[9].live = dur(r) / H;
+  if (r) { const x = days.find(x => dayKey(x.d) === fastDay(r)) || days[9]; x.live = dur(r) / H; }
   const all = days.flatMap(x => x.list);
   const maxH = Math.max(Math.max(db.goalWd, db.goalWe) * 1.25, ...days.map(x => Math.max(x.h, x.live || 0)));
   const W = 340, Hh = 190, base = 165, top = 18, bw = 20, gap = W / 10;
