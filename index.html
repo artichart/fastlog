@@ -75,7 +75,7 @@ svg text{font-family:inherit}
 <body>
 <header>
   <button class="iconbtn" onclick="openSettings()" aria-label="ตั้งค่า">⚙︎</button>
-  <h1>Fast<b>Log</b></h1>
+  <h1>Fast<b>Log</b> <span id="syncDot" style="font-size:12px;font-weight:400;color:var(--mute)"></span></h1>
   <button class="iconbtn" onclick="openFast()" aria-label="เพิ่มย้อนหลัง">＋</button>
 </header>
 
@@ -222,7 +222,9 @@ svg text{font-family:inherit}
     <label>น้ำหนักเป้าหมาย (กก.)</label>
     <input type="number" id="tKg" inputmode="decimal" step="0.1">
     <button class="primary" style="margin-top:10px" onclick="saveTarget()">บันทึก</button>
-    <label style="margin-top:18px">ข้อมูลอยู่ในเครื่องนี้เท่านั้น ควรสำรองไว้เป็นระยะ</label>
+    <label style="margin-top:18px">คลาวด์ (บัญชีเดียวกับ TradeCal)</label>
+    <div id="cloudBox"></div>
+    <label style="margin-top:18px">สำรองเป็นไฟล์</label>
     <div class="row">
       <button class="ghost" style="flex:1" onclick="exportData()">สำรองข้อมูล</button>
       <button class="ghost" style="flex:1" onclick="document.getElementById('imp').click()">กู้คืน</button>
@@ -232,6 +234,7 @@ svg text{font-family:inherit}
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 const KEY = 'fastlog.v1';
 const H = 3600e3, DAY = 24 * H;
@@ -270,7 +273,139 @@ function goalOfDay(ms, d = db) { return isWeekend(ms) ? d.goalWe : d.goalWd; }
 // การอดเป็นของวันที่เริ่ม · เริ่มก่อนตี 5 = ยังนับเป็นคืนของเมื่อวาน
 function fastDayMs(start) { return start - DAY_CUT; }
 function goalFor(start, d = db) { return goalOfDay(fastDayMs(start), d); }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('บันทึกไม่ได้: ' + e.message); } }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('บันทึกไม่ได้: ' + e.message); } soon(); }
+
+/* ---------- cloud (Supabase · โปรเจกต์เดียวกับ TradeCal) ----------
+   เครื่องนี้ยังเป็นตัวหลัก (ใช้ได้ตอนออฟไลน์) · SNAP = สิ่งที่รู้ว่าคลาวด์มีอยู่
+   ส่งขึ้น = ของที่ต่างจาก SNAP (แก้/เพิ่ม) + ที่อยู่ใน SNAP แต่ในเครื่องไม่มี (ลบ) → ทุกจุดที่ save() ซิงก์เองหมด
+   ดึงลง = ข้อมูลคลาวด์ ทับด้วยของที่ยังค้างส่ง · ล็อกอินครั้งแรก (SNAP ว่าง) = รวมของในเครื่องขึ้นไป */
+const SB_URL = 'https://okgjthvmhkhxnhhzcxsd.supabase.co';
+const SB_KEY = 'sb_publishable_w0PdjyPTHyAKZwtcuP_V8A_M9E-vGQa'; // publishable key ใส่ในแอปได้ RLS กันข้อมูลไว้
+const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+const SKEY = 'fastlog.snap';
+let me = null, syncMsg = '', flushing = false, soonH = null, lastSync = null;
+let SNAP; try { SNAP = JSON.parse(localStorage.getItem(SKEY)); } catch (e) {}
+SNAP = SNAP || { user: null, f: {}, w: {}, p: null };
+const saveSnap = () => { try { localStorage.setItem(SKEY, JSON.stringify(SNAP)); } catch (e) {} };
+const fSig = f => JSON.stringify([f.start, f.end || null, f.goal]);
+const wSig = w => String(w.kg);
+const pSig = d => JSON.stringify([d.goalWd, d.goalWe, d.targetKg || null]);
+const iso = ms => new Date(ms).toISOString();
+const ok = async p => { const r = await p; if (r.error) throw r.error; return r; };
+function soon() { if (!sb || !me) return; clearTimeout(soonH); soonH = setTimeout(flush, 800); }
+function pending() {
+  const fid = new Set(db.fasts.map(f => f.id)), wd = new Set(db.weights.map(w => w.date));
+  return {
+    f: db.fasts.filter(f => SNAP.f[f.id] !== fSig(f)), df: Object.keys(SNAP.f).filter(id => !fid.has(id)),
+    w: db.weights.filter(w => SNAP.w[w.date] !== wSig(w)), dw: Object.keys(SNAP.w).filter(d => !wd.has(d)),
+    p: SNAP.p !== pSig(db)
+  };
+}
+const pendN = q => q.f.length + q.df.length + q.w.length + q.dw.length + (q.p ? 1 : 0);
+async function flush() {
+  if (!me || SNAP.user !== me.id || flushing) return syncDot();
+  const q = pending();
+  if (!pendN(q)) return syncDot();
+  if (!navigator.onLine) { syncMsg = 'ออฟไลน์ · รอส่ง'; return syncDot(); }
+  flushing = true; syncDot();
+  try {
+    const now = iso(Date.now());
+    if (q.f.length) {
+      await ok(sb.from('fl_fasts').upsert(q.f.map(f => ({ user_id: me.id, id: f.id, start_at: iso(f.start), end_at: f.end ? iso(f.end) : null, goal: f.goal, updated_at: now }))));
+      q.f.forEach(f => SNAP.f[f.id] = fSig(f));
+    }
+    if (q.df.length) { await ok(sb.from('fl_fasts').delete().in('id', q.df)); q.df.forEach(id => delete SNAP.f[id]); }
+    if (q.w.length) {
+      await ok(sb.from('fl_weights').upsert(q.w.map(w => ({ user_id: me.id, date: w.date, kg: w.kg, updated_at: now }))));
+      q.w.forEach(w => SNAP.w[w.date] = wSig(w));
+    }
+    if (q.dw.length) { await ok(sb.from('fl_weights').delete().in('date', q.dw)); q.dw.forEach(d => delete SNAP.w[d]); }
+    if (q.p) {
+      const sig = pSig(db);
+      await ok(sb.from('fl_prefs').upsert({ user_id: me.id, goal_wd: db.goalWd, goal_we: db.goalWe, target_kg: db.targetKg || null, updated_at: now }));
+      SNAP.p = sig;
+    }
+    saveSnap(); lastSync = new Date(); syncMsg = '';
+  } catch (e) {
+    saveSnap();
+    syncMsg = /fl_|relation|schema cache/.test(e.message || '') ? 'ยังไม่ได้สร้างตารางใน Supabase (รัน supabase/schema.sql)' : 'ส่งไม่ผ่าน: ' + (e.message || e);
+  }
+  flushing = false; syncDot();
+  if (!syncMsg && pendN(pending())) soon();
+}
+async function pull() {
+  if (!me) return;
+  try {
+    const [cf, cw, cp] = await Promise.all([
+      ok(sb.from('fl_fasts').select('*')).then(r => r.data),
+      ok(sb.from('fl_weights').select('*')).then(r => r.data),
+      ok(sb.from('fl_prefs').select('*').maybeSingle()).then(r => r.data)]);
+    const first = SNAP.user !== me.id;
+    if (first) SNAP = { user: me.id, f: {}, w: {}, p: null };
+    const q = pending();
+    // ฟาสต์: คลาวด์ → ทับด้วยของค้างส่ง → ตัดที่ลบในเครื่อง
+    const local = new Map(db.fasts.map(f => [f.id, f])), fm = new Map(), snapF = {};
+    for (const r of cf) {
+      const f = { id: r.id, start: Date.parse(r.start_at), end: r.end_at ? Date.parse(r.end_at) : null, goal: +r.goal };
+      const l = local.get(r.id); if (l && l.notified) f.notified = true;
+      fm.set(f.id, f); snapF[f.id] = fSig(f);
+    }
+    q.f.forEach(f => fm.set(f.id, f)); q.df.forEach(id => fm.delete(id));
+    const wm = new Map(), snapW = {};
+    for (const r of cw) { const w = { date: r.date, kg: +r.kg }; wm.set(w.date, w); snapW[w.date] = wSig(w); }
+    q.w.forEach(w => wm.set(w.date, w)); q.dw.forEach(d => wm.delete(d));
+    let snapP = null;
+    if (cp) {
+      const c = { goalWd: +cp.goal_wd, goalWe: +cp.goal_we, targetKg: cp.target_kg == null ? null : +cp.target_kg };
+      snapP = pSig(c);
+      if (!q.p || first && !db.fasts.length) Object.assign(db, c);
+    }
+    db.fasts = [...fm.values()]; db.weights = [...wm.values()];
+    SNAP = { user: me.id, f: snapF, w: snapW, p: snapP }; saveSnap();
+    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {}
+    lastSync = new Date(); syncMsg = '';
+    render(); flush();
+  } catch (e) {
+    syncMsg = /fl_|relation|schema cache/.test(e.message || '') ? 'ยังไม่ได้สร้างตารางใน Supabase (รัน supabase/schema.sql)' : 'ดึงข้อมูลไม่ได้: ' + (e.message || e);
+    syncDot();
+  }
+}
+function syncDot() {
+  const n = SNAP.user ? pendN(pending()) : 0;
+  $('syncDot').textContent = !SNAP.user ? '' : !me ? '☁︎ ออก' : flushing ? '☁︎ …' : syncMsg ? '☁︎ !' : n ? '☁︎ ' + n : '☁︎ ✓';
+  $('syncDot').style.color = syncMsg || (SNAP.user && !me) ? 'var(--bad)' : '';
+  if ($('shSet').classList.contains('on')) renderCloud();
+}
+function renderCloud() {
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  if (!sb) { $('cloudBox').innerHTML = '<div class="mute">โหลดตัวเชื่อมคลาวด์ไม่ได้ (ออฟไลน์?)</div>'; return; }
+  if (!me) {
+    $('cloudBox').innerHTML = `<input type="email" id="cEmail" placeholder="อีเมล" autocomplete="username">
+      <input type="password" id="cPw" placeholder="รหัสผ่าน" autocomplete="current-password" style="margin-top:8px">
+      <button class="primary" style="margin-top:10px" onclick="cloudIn()">ล็อกอิน</button>
+      <div class="mute" style="margin-top:6px;font-size:13px">${syncMsg ? esc(syncMsg) + ' · ' : ''}ล็อกอินครั้งแรก = ย้ายข้อมูลในเครื่องขึ้นคลาวด์ (รวมกับที่มีอยู่ ไม่ลบ)</div>`;
+    return;
+  }
+  const n = pendN(pending());
+  $('cloudBox').innerHTML = `<div class="row between"><span>${esc(me.email || '')}</span><button class="ghost" onclick="cloudOut()">ออก</button></div>
+    <div class="mute" style="margin-top:6px;font-size:13px">${syncMsg ? '⚠️ ' + esc(syncMsg) : flushing ? 'กำลังส่ง…' : n ? 'รอส่ง ' + n + ' รายการ' : 'ซิงก์แล้ว' + (lastSync ? ' ' + hm(lastSync.getTime()) : '')}
+    · <a href="#" style="color:var(--accent)" onclick="pull();return false">ดึงใหม่</a></div>`;
+}
+async function cloudIn() {
+  const email = $('cEmail').value.trim(), password = $('cPw').value;
+  if (!email || !password) return alert('ใส่อีเมลและรหัสผ่าน');
+  const r = await sb.auth.signInWithPassword({ email, password });
+  if (r.error) return alert('ล็อกอินไม่ได้: ' + r.error.message);
+}
+async function cloudOut() { if (confirm('ออกจากคลาวด์? ข้อมูลในเครื่องยังอยู่')) { await sb.auth.signOut(); syncDot(); renderCloud(); } }
+if (sb) {
+  sb.auth.onAuthStateChange((ev, s) => {
+    const u = s ? s.user : null, was = me && me.id;
+    me = u; if (u && u.id !== was) setTimeout(pull, 0);
+    setTimeout(syncDot, 0);
+  });
+  addEventListener('online', () => { syncMsg = ''; flush(); });
+}
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 
 // ---------- helpers ----------
@@ -576,6 +711,7 @@ function delWeight(date) { if (confirm('ลบน้ำหนักวันน�
 // ---------- settings / backup ----------
 function openSettings() {
   $('tKg').value = db.targetKg || '';
+  renderCloud();
   $('lastBackup').textContent = db.lastBackup ? 'สำรองล่าสุด ' + dShort(db.lastBackup) + ' ' + hm(db.lastBackup) : 'ยังไม่เคยสำรอง';
   $('shSet').classList.add('on');
 }
@@ -606,7 +742,7 @@ function importData(file) {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 render();
 setInterval(renderTimer, 1000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); if (me) pull(); } });
 </script>
 </body>
 </html>
